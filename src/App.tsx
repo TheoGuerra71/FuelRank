@@ -15,6 +15,9 @@ import RefuelHistory from "./pages/RefuelHistory";
 import SearchPage from "./pages/SearchPage";
 import StationDetail from "./pages/StationDetail";
 
+// 1. Nova importação da super tela de Avaliação/Denúncia!
+import EvaluateStation from "./pages/EvaluateStation";
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -31,6 +34,10 @@ const App = () => (
             {/* Rotas Principais - Sem ProtectedRoute para destravar o carregamento */}
             <Route path="/" element={<Index />} />
             <Route path="/station/:id" element={<StationDetail />} />
+            
+            {/* 2. Rota ATUALIZADA para a nova super tela de Avaliação! */}
+            <Route path="/station/:id/evaluate" element={<EvaluateStation />} />
+
             <Route path="/profile" element={<Profile />} />
             <Route path="/ranking" element={<Ranking />} />
             <Route path="/refuels" element={<RefuelHistory />} />
