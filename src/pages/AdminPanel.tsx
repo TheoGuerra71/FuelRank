@@ -4,56 +4,92 @@ import { AlertTriangle, ArrowLeft, CheckCircle, MapPin, Search, Shield, ShieldAl
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+// 🛡️ O Painel Administrativo: A "Central de Comando" do dono do aplicativo.
 const AdminPanel = () => {
+  // 🧭 useNavigate é usado para voltar para a tela anterior quando clicamos na setinha do topo.
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState("postos"); // postos, usuarios, denuncias
+
+  // ==========================================
+  // ESTADOS GERAIS DA TELA
+  // ==========================================
+  
+  // 🗂️ Controla qual aba está visível no momento (Postos, Usuários ou Denúncias). 
+  // Começamos sempre olhando para a aba 'postos'.
+  const [activeTab, setActiveTab] = useState("postos"); 
+  
+  // ⏳ Estado de carregamento. Enquanto busca no banco de dados, fica 'true' e mostra a bolinha girando.
   const [isLoading, setIsLoading] = useState(true);
 
-  // Estados dos Dados
-  const [stations, setStations] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
-  const [reports, setReports] = useState<any[]>([]); // Denúncias
+  // ==========================================
+  // ESTADOS DOS DADOS (O que vem do Banco de Dados)
+  // ==========================================
+  const [stations, setStations] = useState<any[]>([]); // Todos os postos cadastrados
+  const [users, setUsers] = useState<any[]>([]);       // Todos os usuários (para o ranking e controle)
+  const [reports, setReports] = useState<any[]>([]);   // Denúncias esperando aprovação do admin
 
+  // ==========================================
+  // BUSCA INICIAL DE DADOS (Ao abrir o painel)
+  // ==========================================
+  // ⚡ useEffect com array vazio '[]' significa: "Rode isso apenas UMA VEZ quando a tela carregar".
   useEffect(() => {
     const fetchAdminData = async () => {
       try {
-        // Busca Postos
+        // 1. Busca todos os Postos, ordenando dos mais recentes (created_at descending) para os mais antigos
         const { data: stationsData } = await supabase.from("stations").select("*").order("created_at", { ascending: false });
         if (stationsData) setStations(stationsData);
 
-        // Busca Usuários
+        // 2. Busca todos os Usuários, ordenando dos mais pontuados para os menos pontuados
         const { data: usersData } = await supabase.from("profiles").select("*").order("points", { ascending: false });
         if (usersData) setUsers(usersData);
 
-        // Busca Denúncias Pendentes (Aqui assumimos que você tem uma tabela evaluations ou reports)
-        // Como não temos a estrutura exata, se der erro, ele apenas mostra vazio graciosamente
+        // 3. Busca Denúncias Pendentes. 
+        // ⚠️ Detalhe Mestre: Usamos .select("*, stations(name), profiles(display_name)") para fazer 
+        // um "JOIN" automático! O Supabase já traz o nome do posto e o nome do usuário 
+        // que fez a denúncia na mesma requisição, evitando buscas extras!
+        // O .catch(() => ({ data: [] })) é uma rede de segurança: se a tabela de denúncias 
+        // ainda não existir no banco, a tela não quebra, só retorna um array vazio.
         const { data: reportsData } = await supabase.from("evaluations").select("*, stations(name), profiles(display_name)").eq("status", "pending").catch(() => ({ data: [] }));
         if (reportsData) setReports(reportsData);
 
       } catch (error) {
-        console.error("Erro ao buscar dados do painel:", error);
+        console.error("Erro ao buscar dados do painel:", error); // Em caso de erro, avisa no F12
       } finally {
-        setIsLoading(false);
+        setIsLoading(false); // Independentemente de dar certo ou errado, desliga a bolinha de loading
       }
     };
 
     fetchAdminData();
   }, []);
 
-  // Funções de Ação do Admin (Exemplos)
+  // ==========================================
+  // AÇÕES ADMINISTRATIVAS (O Poder do Admin)
+  // ==========================================
+  
+  // 🔖 Função para alterar a "reputação" (selo) de um posto diretamente pelo painel.
   const handleUpdateSeal = async (stationId: string, newSeal: string) => {
     try {
+      // 1. Envia a ordem para o Supabase atualizar a coluna 'seal' lá no servidor
       await supabase.from("stations").update({ seal: newSeal }).eq("id", stationId);
+      
+      // 2. Pulo do Gato (Otimização Otimista): Em vez de recarregar a página toda para ver a mudança,
+      // atualizamos a lista 'stations' no React na mesma hora.
+      // O 'map' varre a lista: se for o ID do posto que mudamos, atualiza o selo dele na tela.
       setStations(stations.map(s => s.id === stationId ? { ...s, seal: newSeal } : s));
     } catch (error) {
       alert("Erro ao atualizar selo.");
     }
   };
 
+  // ==========================================
+  // RENDERIZAÇÃO DA TELA
+  // ==========================================
   return (
     <div className="min-h-screen bg-secondary/20 pb-24 font-sans">
       
-      {/* CABEÇALHO DARK EXECUTIVO */}
+      {/* 🌑 CABEÇALHO DARK EXECUTIVO
+          Decidimos fazer o painel de Admin bem diferente do app do usuário comum
+          (usando fundo escuro 'bg-slate-900') para que o dono do app saiba
+          imediatamente que está num ambiente restrito. */}
       <div className="bg-slate-900 px-4 pt-12 pb-20 rounded-b-[40px] shadow-2xl relative z-0">
         <div className="flex items-center gap-3 mb-6">
           <button onClick={() => navigate(-1)} className="p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors">
@@ -67,7 +103,7 @@ const AdminPanel = () => {
           </div>
         </div>
 
-        {/* Barra de Busca Rápida Admin */}
+        {/* 🔍 Barra de Busca (Visual apenas, a funcionalidade real pode ser conectada depois) */}
         <div className="relative">
           <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
           <input 
@@ -78,7 +114,8 @@ const AdminPanel = () => {
         </div>
       </div>
 
-      {/* CARDS DE ESTATÍSTICAS (Flutuando sobre o header) */}
+      {/* 📊 CARDS DE ESTATÍSTICAS (Visão Panorâmica)
+          Ficam "flutuando" com margem negativa '-mt-12' para sobrepor o cabeçalho escuro. */}
       <div className="px-4 -mt-12 relative z-10">
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-background rounded-2xl p-4 shadow-lg border border-border/50 flex flex-col items-center justify-center gap-1">
@@ -92,6 +129,7 @@ const AdminPanel = () => {
             <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Usuários</span>
           </div>
           <div className="bg-background rounded-2xl p-4 shadow-lg border border-border/50 flex flex-col items-center justify-center gap-1 relative overflow-hidden">
+            {/* Se houver denúncias, exibe uma barrinha vermelha pulsante no topo do cartão para alertar o admin! */}
             {reports.length > 0 && <div className="absolute top-0 w-full h-1 bg-destructive animate-pulse"></div>}
             <AlertTriangle size={20} className="text-destructive mb-1" />
             <span className="font-display font-bold text-xl text-foreground">{reports.length}</span>
@@ -100,7 +138,8 @@ const AdminPanel = () => {
         </div>
       </div>
 
-      {/* ABAS DE NAVEGAÇÃO */}
+      {/* 📑 ABAS DE NAVEGAÇÃO INTERNA
+          Botões para alternar o conteúdo da tela principal (Postos / Usuários / Denúncias) */}
       <div className="px-4 mt-6 mb-4">
         <div className="flex bg-muted/50 p-1 rounded-xl border border-border/50">
           {[
@@ -114,6 +153,7 @@ const AdminPanel = () => {
               className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg transition-all ${activeTab === tab.id ? 'bg-background text-foreground shadow-sm border border-border/50' : 'text-muted-foreground hover:text-foreground'}`}
             >
               {tab.icon} {tab.label}
+              {/* Badge vermelha na aba de denúncias se houver pendências (Atenção extra!) */}
               {tab.id === 'denuncias' && reports.length > 0 && (
                 <span className="bg-destructive text-white text-[10px] px-1.5 py-0.5 rounded-full">{reports.length}</span>
               )}
@@ -122,14 +162,18 @@ const AdminPanel = () => {
         </div>
       </div>
 
-      {/* CONTEÚDO DAS ABAS */}
+      {/* 📦 CONTEÚDO DINÂMICO DAS ABAS */}
       <div className="px-4 space-y-4">
         {isLoading ? (
+          // Spinner de carregamento padrão
           <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div></div>
         ) : (
+          // AnimatePresence permite animações de "entrada" e "saída" quando trocamos de aba (framer-motion)
           <AnimatePresence mode="wait">
             
-            {/* --- ABA POSTOS --- */}
+            {/* =======================
+                ABA 1: GESTÃO DE POSTOS 
+                ======================= */}
             {activeTab === "postos" && (
               <motion.div key="postos" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-3">
                 {stations.map((station) => (
@@ -140,7 +184,7 @@ const AdminPanel = () => {
                         <p className="text-[10px] text-muted-foreground mt-0.5">{station.address}</p>
                       </div>
                       
-                      {/* Selo Atual */}
+                      {/* Lógica Visual de Cores para o Selo de Qualidade do Posto */}
                       {station.seal === 'trusted' ? (
                         <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1"><ShieldCheck size={12}/> Confiável</span>
                       ) : station.seal === 'complaints' ? (
@@ -152,7 +196,8 @@ const AdminPanel = () => {
 
                     <hr className="border-border/50" />
                     
-                    {/* Botões de Ação Rápida */}
+                    {/* Botões que chamam a função 'handleUpdateSeal' com o novo status.
+                        O estilo condicional (ternário) deixa o botão preenchido se ele já for o status atual. */}
                     <div className="flex gap-2">
                       <button onClick={() => handleUpdateSeal(station.id, 'trusted')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-colors border ${station.seal === 'trusted' ? 'bg-green-500 text-white border-green-500' : 'bg-transparent text-muted-foreground border-border hover:bg-green-50'}`}>
                         Tornar Confiável
@@ -166,11 +211,14 @@ const AdminPanel = () => {
               </motion.div>
             )}
 
-            {/* --- ABA USUÁRIOS --- */}
+            {/* =======================
+                ABA 2: GESTÃO DE USUÁRIOS 
+                ======================= */}
             {activeTab === "usuarios" && (
               <motion.div key="usuarios" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-3">
                 {users.map((user) => (
                   <div key={user.id} className="bg-background border border-border rounded-xl p-3 flex items-center gap-4 shadow-sm">
+                    {/* Avatar gerado automaticamente com a primeira letra do nome */}
                     <div className="w-10 h-10 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center font-bold font-display">
                       {user.display_name?.charAt(0).toUpperCase() || "U"}
                     </div>
@@ -178,6 +226,7 @@ const AdminPanel = () => {
                       <h3 className="font-bold text-sm text-foreground">{user.display_name || "Usuário Anônimo"}</h3>
                       <p className="text-[10px] text-muted-foreground font-medium">{user.influence_level || "Iniciante"}</p>
                     </div>
+                    {/* Badge de pontuação gamificada */}
                     <div className="text-right">
                       <span className="bg-orange-100 text-orange-600 font-bold text-xs px-2 py-1 rounded-lg">{user.points || 0} pts</span>
                     </div>
@@ -186,26 +235,34 @@ const AdminPanel = () => {
               </motion.div>
             )}
 
-            {/* --- ABA DENÚNCIAS --- */}
+            {/* =======================
+                ABA 3: CAIXA DE DENÚNCIAS 
+                ======================= */}
             {activeTab === "denuncias" && (
               <motion.div key="denuncias" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-3">
+                
+                {/* Condicional: Tem denúncia? Lista elas. Se não, mostra a mensagem de paz! */}
                 {reports.length > 0 ? reports.map((report) => (
                   <div key={report.id} className="bg-background border-2 border-destructive/20 rounded-xl p-4 shadow-sm relative overflow-hidden">
+                    {/* Detalhe estético: Barra lateral vermelha indicando urgência */}
                     <div className="absolute top-0 left-0 w-1 h-full bg-destructive"></div>
                     
                     <div className="flex justify-between items-start mb-2">
                       <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
                         <AlertTriangle size={16} className="text-destructive"/> Fraude Reportada
                       </h3>
+                      {/* Converte a data do banco (ISO string) para formato brasileiro padrão */}
                       <span className="text-[10px] text-muted-foreground">{new Date(report.created_at).toLocaleDateString()}</span>
                     </div>
                     
+                    {/* Caixa com o detalhe do que aconteceu (Graças ao 'JOIN' lá no início, temos os nomes aqui) */}
                     <div className="bg-muted/50 p-3 rounded-lg text-xs text-foreground mb-3 space-y-1 border border-border/50">
                       <p><span className="font-bold text-muted-foreground">Posto:</span> {report.stations?.name || "Desconhecido"}</p>
                       <p><span className="font-bold text-muted-foreground">Usuário:</span> {report.profiles?.display_name || "Anônimo"}</p>
                       <p><span className="font-bold text-muted-foreground">Relato:</span> "{report.comment || "Sem comentário"}"</p>
                     </div>
 
+                    {/* Botões visuais (A lógica de aprovar/descartar pode ser conectada aqui no futuro) */}
                     <div className="flex gap-2">
                       <button className="flex-1 bg-green-500 text-white font-bold text-xs py-2.5 rounded-lg flex items-center justify-center gap-1 active:scale-95 shadow-sm">
                         <CheckCircle size={14}/> Aprovar Punição
@@ -216,6 +273,7 @@ const AdminPanel = () => {
                     </div>
                   </div>
                 )) : (
+                  // Empty State: Quando o administrador zera a caixa de entrada (Paz de espírito)
                   <div className="text-center py-16 px-4 bg-background rounded-2xl border border-dashed border-border">
                     <CheckCircle size={32} className="text-green-500 mx-auto mb-3 opacity-50"/>
                     <h3 className="font-bold text-foreground text-sm">Tudo tranquilo por aqui!</h3>
