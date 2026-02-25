@@ -4,16 +4,35 @@ import { motion } from "framer-motion";
 import { Crown, Flame, Medal, ShieldAlert, Trophy } from "lucide-react";
 import { useEffect, useState } from "react";
 
+// 🏆 TELA DE RANKING: O Coliseu do FuelRank.
+// É aqui que a mágica da gamificação acontece. Motoristas competem por pontos
+// ajudando a comunidade (cadastrando postos, atualizando preços, denunciando fraudes).
 const Ranking = () => {
+  // ==========================================
+  // ESTADOS DA TELA (Memória)
+  // ==========================================
+  
+  // Lista de motoristas que vão aparecer no ranking
   const [users, setUsers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("pontos"); // 'pontos' ou 'fraudes'
+  
+  // 🎛️ Controle de Abas: O usuário quer ver quem tem mais pontos ou quem denuncia mais?
+  // (Nota para o Theo do futuro: A lógica do banco para a aba 'fraudes' pode ser conectada depois,
+  // mas a interface já está 100% pronta para reagir a essa mudança de estado).
+  const [activeTab, setActiveTab] = useState("pontos"); 
 
+  // ==========================================
+  // BUSCA DE DADOS (A Classificação)
+  // ==========================================
+  // Esse useEffect roda toda vez que a tela abre, OU toda vez que a aba (activeTab) mudar.
   useEffect(() => {
     const fetchRanking = async () => {
       setIsLoading(true);
       try {
-        // Busca os usuários ordenados pelos pontos
+        // ⚡ A Consulta Suprema:
+        // Vai na tabela de perfis, ordena todo mundo pelos pontos (do maior pro menor)
+        // e pega SÓ os 50 primeiros. Afinal, ninguém vai rolar a tela pra ver o 15.000º colocado, 
+        // e isso economiza muita banda de internet!
         const { data, error } = await supabase
           .from("profiles")
           .select("*")
@@ -21,8 +40,11 @@ const Ranking = () => {
           .limit(50);
 
         if (data) {
-          // Se o banco estiver vazio, colocamos dados falsos só para você ver como a tela é linda!
-          // Assim que tiver usuários reais com pontos, ele mostra os reais.
+          // 🎭 TRUQUE DE ENGENHARIA DE UI (Mock Data Injetion)
+          // Se o banco estiver vazio (app acabou de lançar), a tela ia ficar em branco. 
+          // Para o seu portfólio e apresentação ficarem impecáveis, nós injetamos 
+          // dados "falsos" se houver menos de 3 pessoas reais cadastradas.
+          // Assim que 3 motoristas reais ganharem pontos, esses falsos somem automaticamente!
           if (data.length < 3) {
             setUsers([
               { id: '1', display_name: 'Theo Guerra', points: 1250, influence_level: 'Embaixador', total_refuels: 42 },
@@ -32,7 +54,7 @@ const Ranking = () => {
               { id: '5', display_name: 'Mariana Costa', points: 150, influence_level: 'Iniciante', total_refuels: 3 },
             ]);
           } else {
-            setUsers(data);
+            setUsers(data); // Usa os dados reais do Supabase
           }
         }
       } catch (error) {
@@ -45,13 +67,23 @@ const Ranking = () => {
     fetchRanking();
   }, [activeTab]);
 
-  // Prepara o Pódio (Top 3) e a Lista (Resto)
+  // ==========================================
+  // 🔪 O Fatiador de Arrays (Separação de UI)
+  // ==========================================
+  // Por que fatiar? Porque os 3 primeiros colocados ganham um layout GIGANTE (O Pódio).
+  // Do 4º em diante, é só uma lista normal. 
+  // 'slice(0, 3)' pega as posições 0, 1 e 2.
+  // 'slice(3)' pega da posição 3 em diante até o final.
   const top3 = users.slice(0, 3);
   const restOfUsers = users.slice(3);
 
+  // ==========================================
+  // RENDERIZAÇÃO DA TELA
+  // ==========================================
   return (
     <div className="min-h-screen bg-background pb-24 relative">
-      {/* Cabeçalho */}
+      
+      {/* 🔴 CABEÇALHO VERMELHO FIXO */}
       <div className="bg-primary px-4 pt-12 pb-6 rounded-b-[40px] shadow-md relative z-20">
         <div className="flex justify-between items-center mb-6">
           <div>
@@ -62,7 +94,8 @@ const Ranking = () => {
           </div>
         </div>
 
-        {/* Abas de Categoria */}
+        {/* 🎛️ ABAS DE CATEGORIA DA COMPETIÇÃO
+            O botão que estiver ativo ganha fundo branco e texto da cor primária. */}
         <div className="flex bg-black/20 p-1 rounded-xl backdrop-blur-sm">
           <button 
             onClick={() => setActiveTab('pontos')}
@@ -85,10 +118,14 @@ const Ranking = () => {
         </div>
       ) : (
         <>
-          {/* O PÓDIO (Top 3) */}
+          {/* ===================================== */}
+          {/* 🏛️ O PÓDIO DOS CAMPEÕES (Top 3)        */}
+          {/* ===================================== */}
+          {/* Usamos flexbox com 'items-end' para que eles fiquem alinhados pela base.
+              A ordem no HTML é 2º, 1º e 3º para que o Ouro fique no meio fisicamente! */}
           <div className="px-4 pt-8 pb-6 flex justify-center items-end gap-2 sm:gap-4 relative -mt-4">
             
-            {/* 2º Lugar (Prata) */}
+            {/* 🥈 2º Lugar (Prata) - Fica na esquerda */}
             {top3[1] && (
               <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="flex flex-col items-center w-24">
                 <div className="relative mb-2">
@@ -99,6 +136,7 @@ const Ranking = () => {
                     <Medal size={14} className="text-slate-600" />
                   </div>
                 </div>
+                {/* A base do pódio (menor que o ouro) */}
                 <div className="bg-slate-100 border border-slate-200 w-full pt-4 pb-2 px-1 rounded-t-xl text-center shadow-inner flex flex-col items-center">
                   <p className="text-[10px] font-bold text-foreground truncate w-full">{top3[1].display_name}</p>
                   <p className="text-xs font-bold text-slate-600">{top3[1].points} pts</p>
@@ -106,7 +144,7 @@ const Ranking = () => {
               </motion.div>
             )}
 
-            {/* 1º Lugar (Ouro) */}
+            {/* 🥇 1º Lugar (Ouro) - Fica no meio, é maior e tem a coroa! */}
             {top3[0] && (
               <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="flex flex-col items-center w-28 z-10">
                 <div className="relative mb-2">
@@ -118,6 +156,7 @@ const Ranking = () => {
                     <Trophy size={16} className="text-yellow-900" />
                   </div>
                 </div>
+                {/* A base do pódio (a mais alta de todas - h-24) */}
                 <div className="bg-gradient-to-t from-yellow-100 to-yellow-50 border border-yellow-200 w-full pt-5 pb-3 px-1 rounded-t-xl text-center shadow-[0_-5px_15px_rgba(234,179,8,0.2)] flex flex-col items-center h-24 justify-start">
                   <p className="text-xs font-bold text-foreground truncate w-full mb-0.5">{top3[0].display_name}</p>
                   <p className="text-[10px] text-yellow-700 font-bold uppercase mb-1">{top3[0].influence_level}</p>
@@ -128,7 +167,7 @@ const Ranking = () => {
               </motion.div>
             )}
 
-            {/* 3º Lugar (Bronze) */}
+            {/* 🥉 3º Lugar (Bronze) - Fica na direita, a base mais baixinha */}
             {top3[2] && (
               <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="flex flex-col items-center w-24">
                 <div className="relative mb-2">
@@ -147,17 +186,22 @@ const Ranking = () => {
             )}
           </div>
 
-          {/* LISTA DOS DEMAIS COLOCADOS (4º em diante) */}
+          {/* ===================================== */}
+          {/* 📜 LISTA DE COLOCADOS (4º em diante)    */}
+          {/* ===================================== */}
           <div className="px-4 space-y-3">
+            {/* O map percorre o array 'fatiado' que criamos lá em cima. */}
             {restOfUsers.map((user, index) => (
               <motion.div 
                 key={user.id || index}
-                initial={{ opacity: 0, x: -20 }}
+                initial={{ opacity: 0, x: -20 }} // Animação deslizando da esquerda pra direita
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.5 + (index * 0.1) }}
+                transition={{ delay: 0.5 + (index * 0.1) }} // Demora um pouco pra começar, pra dar tempo do pódio aparecer primeiro!
                 className="bg-card border border-border rounded-xl p-3 flex items-center gap-4 shadow-sm"
               >
                 <div className="w-8 text-center font-display font-bold text-muted-foreground text-lg">
+                  {/* Como o array restOfUsers começa do índice 0 (que na verdade é o 4º lugar no banco),
+                      nós somamos 'index + 4' para exibir o número correto da classificação! */}
                   {index + 4}º
                 </div>
                 <div className="w-10 h-10 bg-secondary rounded-full flex items-center justify-center font-bold text-foreground">
