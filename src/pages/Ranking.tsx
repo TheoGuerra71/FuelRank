@@ -1,8 +1,9 @@
 import BottomNav from "@/components/BottomNav";
-import { supabase } from "@/integrations/supabase/client";
+import { apiRequest } from '@/lib/api';
 import { motion } from "framer-motion";
 import { Crown, Flame, Medal, ShieldAlert, Trophy } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { ProfileRow } from "@/types/app";
 
 // 🏆 TELA DE RANKING: O Coliseu do FuelRank.
 // É aqui que a mágica da gamificação acontece. Motoristas competem por pontos
@@ -13,7 +14,7 @@ const Ranking = () => {
   // ==========================================
   
   // Lista de motoristas que vão aparecer no ranking
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<Pick<ProfileRow, "id" | "display_name" | "points" | "influence_level" | "total_refuels">[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
   // 🎛️ Controle de Abas: O usuário quer ver quem tem mais pontos ou quem denuncia mais?
@@ -33,11 +34,7 @@ const Ranking = () => {
         // Vai na tabela de perfis, ordena todo mundo pelos pontos (do maior pro menor)
         // e pega SÓ os 50 primeiros. Afinal, ninguém vai rolar a tela pra ver o 15.000º colocado, 
         // e isso economiza muita banda de internet!
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("*")
-          .order("points", { ascending: false })
-          .limit(50);
+        const data = await apiRequest<Pick<ProfileRow, 'id' | 'display_name' | 'points' | 'influence_level' | 'total_refuels'>[]>('ranking', { query: { mode: activeTab } });
 
         if (data) {
           // 🎭 TRUQUE DE ENGENHARIA DE UI (Mock Data Injetion)
