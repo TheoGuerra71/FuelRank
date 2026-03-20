@@ -1,149 +1,224 @@
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { useAuth } from "@/contexts/AuthContext";
-import { Fuel } from "lucide-react";
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { useAuth } from '@/contexts/AuthContext';
+import { Building2, Fuel, KeyRound, MailCheck, ShieldCheck } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 
-// 🔐 Tela de Autenticação: A porta de entrada do FuelRank.
-// Aqui nós juntamos Login e Cadastro na mesma tela para facilitar a vida do usuário.
+type AuthMode = 'login' | 'register' | 'forgot' | 'reset';
+
+interface RegisterFormState {
+  displayName: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  phone: string;
+  cpf: string;
+  documentId: string;
+  companyName: string;
+  tenantSlug: string;
+}
+
+const initialRegisterState: RegisterFormState = {
+  displayName: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+  phone: '',
+  cpf: '',
+  documentId: '',
+  companyName: '',
+  tenantSlug: '',
+};
+
 const Auth = () => {
-  // ==========================================
-  // ESTADOS DA TELA (Memória do Componente)
-  // ==========================================
-  
-  // 🔄 O grande truque da tela: esse estado define se estamos no modo "Login" (true) ou "Cadastro" (false).
-  // Quando ele muda, a tela se adapta automaticamente, mostrando ou escondendo o campo de nome.
-  const [isLogin, setIsLogin] = useState(true);
-  
-  // Campos que o usuário vai digitar
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  
-  // ⏳ Trava do botão: impede que o cara clique 50 vezes enquanto o servidor pensa
-  const [loading, setLoading] = useState(false);
-  
-  // ==========================================
-  // HOOKS (Ferramentas externas)
-  // ==========================================
-  
-  // 🧠 O nosso Cérebro de Autenticação (criado em AuthContext.tsx).
-  // Ele que conversa de verdade com o Supabase nos bastidores.
-  const { signIn, signUp } = useAuth();
-  
-  // 🧭 O nosso "motorista" para mudar de página.
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const urlMode = searchParams.get('mode');
+  const inferredMode: AuthMode = urlMode === 'reset' ? 'reset' : 'login';
+  const [mode, setMode] = useState<AuthMode>(inferredMode);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [resetPassword, setResetPassword] = useState('');
+  const [registerForm, setRegisterForm] = useState<RegisterFormState>(initialRegisterState);
+  const [loading, setLoading] = useState(false);
+  const { signIn, signUp, requestPasswordReset, updatePassword, resendVerificationEmail } = useAuth();
 
-  // ==========================================
-  // O GRANDE MOMENTO: ENVIO DO FORMULÁRIO
-  // ==========================================
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); // Impede o navegador de dar refresh na página (padrão irritante do HTML)
-    setLoading(true); // Gira a rodinha do botão
+  const pageTitle = useMemo(() => {
+    if (mode === 'register') return 'Cadastro completo da sua operação';
+    if (mode === 'forgot') return 'Recuperar acesso';
+    if (mode === 'reset') return 'Definir nova senha';
+    return 'Acesse seu tenant com segurança';
+  }, [mode]);
 
-    if (isLogin) {
-      // 🟢 FLUXO DE LOGIN
-      const { error } = await signIn(email, password); // Tenta logar no Supabase
-      if (error) {
-        // Se deu ruim (senha errada, etc), mostra o balãozinho vermelho de erro.
-        toast.error(error.message);
-      } else {
-        // Se deu bom, manda o cara direto pra tela principal (Index/Radar)!
-        navigate("/");
-      }
-    } else {
-      // 🔵 FLUXO DE CADASTRO
-      
-      // Validação de segurança: Não deixa o cara criar conta sem nome
-      if (!displayName.trim()) {
-        toast.error("Informe seu nome.");
-        setLoading(false);
-        return; // Interrompe a função aqui mesmo
-      }
-
-      const { error } = await signUp(email, password, displayName); // Tenta criar a conta
-      if (error) {
-        toast.error(error.message);
-      } else {
-        // No Supabase, geralmente contas novas exigem confirmação por e-mail por segurança.
-        toast.success("Conta criada! Verifique seu e-mail para confirmar.");
-      }
-    }
-    
-    // Independentemente de dar certo ou errado, libera o botão para ser clicado de novo.
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    const { error } = await signIn(email, password);
     setLoading(false);
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    toast.success('Login realizado com sucesso.');
+    navigate('/');
   };
 
-  // ==========================================
-  // RENDERIZAÇÃO DA TELA (O visual)
-  // ==========================================
+  const handleRegister = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (registerForm.password !== registerForm.confirmPassword) {
+      toast.error('As senhas não conferem.');
+      return;
+    }
+
+    setLoading(true);
+    const { error } = await signUp({
+      email: registerForm.email,
+      password: registerForm.password,
+      displayName: registerForm.displayName,
+      phone: registerForm.phone,
+      cpf: registerForm.cpf,
+      documentId: registerForm.documentId,
+      companyName: registerForm.companyName,
+      tenantSlug: registerForm.tenantSlug,
+    });
+    setLoading(false);
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    toast.success('Conta criada. Verifique seu e-mail para ativar o tenant e concluir a segurança da conta.');
+    setMode('login');
+  };
+
+  const handleForgotPassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    const { error } = await requestPasswordReset(email);
+    setLoading(false);
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    toast.success('Enviamos o link de redefinição para o seu e-mail.');
+  };
+
+  const handleResetPassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    const { error } = await updatePassword(resetPassword);
+    setLoading(false);
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    toast.success('Senha atualizada com sucesso. Faça login novamente.');
+    setMode('login');
+    navigate('/auth');
+  };
+
+  const handleResendVerification = async () => {
+    if (!email) {
+      toast.error('Informe seu e-mail para reenviar a verificação.');
+      return;
+    }
+
+    setLoading(true);
+    const { error } = await resendVerificationEmail(email);
+    setLoading(false);
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    toast.success('E-mail de verificação reenviado.');
+  };
+
   return (
-    // min-h-screen garante que a tela ocupe 100% da altura do celular/monitor
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        
-        {/* 🎩 Logo e Boas-vindas Dinâmicas */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-14 h-14 rounded-xl bg-primary flex items-center justify-center mb-4">
-            <Fuel size={28} className="text-primary-foreground" />
+    <div className="min-h-screen bg-background px-4 py-8">
+      <div className="mx-auto grid max-w-6xl gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+        <section className="rounded-3xl bg-primary p-8 text-primary-foreground shadow-xl">
+          <div className="mb-8 flex items-center gap-3">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15"><Fuel size={28} /></div>
+            <div>
+              <h1 className="font-display text-3xl font-bold">FuelRank Cloud</h1>
+              <p className="text-sm text-primary-foreground/80">Multi-tenant, autenticação em cookies e trilha completa de conta.</p>
+            </div>
           </div>
-          <h1 className="font-display text-2xl font-bold text-foreground">FuelRank</h1>
-          {/* Se isLogin for true, mostra um texto. Se for false, mostra outro. Elegante! */}
-          <p className="text-sm text-muted-foreground mt-1">
-            {isLogin ? "Faça login para continuar" : "Crie sua conta"}
-          </p>
-        </div>
+          <div className="space-y-4 text-sm leading-6 text-primary-foreground/90">
+            <div className="flex gap-3 rounded-2xl bg-white/10 p-4"><Building2 className="mt-0.5" size={18} /><div><strong>Tenant isolado:</strong> cada operação passa a trabalhar com tenant próprio, facilitando escalar clientes com isolamento lógico.</div></div>
+            <div className="flex gap-3 rounded-2xl bg-white/10 p-4"><ShieldCheck className="mt-0.5" size={18} /><div><strong>Sessão em cookie:</strong> o cliente do Supabase agora persiste sessão em cookie com `SameSite=Strict` e `Secure` quando disponível.</div></div>
+            <div className="flex gap-3 rounded-2xl bg-white/10 p-4"><MailCheck className="mt-0.5" size={18} /><div><strong>Conta completa:</strong> cadastro com dados pessoais, empresa, verificação de e-mail e fluxo de recuperação de senha.</div></div>
+          </div>
+        </section>
 
-        {/* 📝 O Formulário */}
-        <form onSubmit={handleSubmit} className="space-y-3">
-          
-          {/* MÁGICA: O campo "Seu nome" SÓ aparece se estivermos no modo "Cadastro" (!isLogin) */}
-          {!isLogin && (
-            <Input
-              placeholder="Seu nome"
-              value={displayName} // O value é "amarrado" ao estado
-              onChange={(e) => setDisplayName(e.target.value)} // Atualiza o estado a cada tecla digitada
-              className="bg-card border-border"
-            />
+        <section className="rounded-3xl border border-border bg-card p-6 shadow-sm">
+          <div className="mb-6">
+            <h2 className="font-display text-2xl font-bold text-foreground">{pageTitle}</h2>
+            <p className="mt-2 text-sm text-muted-foreground">Comentários no código foram mantidos para explicar decisões importantes da autenticação e do multi-tenant.</p>
+          </div>
+
+          <div className="mb-5 flex flex-wrap gap-2">
+            <Button type="button" variant={mode === 'login' ? 'default' : 'outline'} onClick={() => setMode('login')}>Login</Button>
+            <Button type="button" variant={mode === 'register' ? 'default' : 'outline'} onClick={() => setMode('register')}>Cadastro</Button>
+            <Button type="button" variant={mode === 'forgot' ? 'default' : 'outline'} onClick={() => setMode('forgot')}>Esqueci a senha</Button>
+          </div>
+
+          {mode === 'login' && (
+            <form onSubmit={handleLogin} className="space-y-4">
+              <Input type="email" placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <Input type="password" placeholder="Senha" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+              <Button type="submit" className="w-full" disabled={loading}>{loading ? 'Entrando...' : 'Entrar'}</Button>
+              <button type="button" onClick={() => setMode('forgot')} className="text-sm text-primary hover:underline">Esqueci minha senha</button>
+              <button type="button" onClick={handleResendVerification} className="block text-sm text-primary hover:underline">Reenviar verificação de e-mail</button>
+            </form>
           )}
-          
-          <Input
-            type="email"
-            placeholder="E-mail"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required // Trava nativa do HTML: impede de enviar vazio
-            className="bg-card border-border"
-          />
-          
-          <Input
-            type="password"
-            placeholder="Senha"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={6} // O Supabase exige no mínimo 6 caracteres, então já barramos aqui no frontend!
-            className="bg-card border-border"
-          />
-          
-          {/* Botão Dinâmico: Muda o texto se estiver logando, cadastrando ou carregando */}
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Carregando..." : isLogin ? "Entrar" : "Criar conta"}
-          </Button>
-        </form>
 
-        {/* 🔄 Link para alternar entre Login e Cadastro */}
-        <p className="text-center text-sm text-muted-foreground mt-4">
-          {isLogin ? "Não tem conta?" : "Já tem conta?"}{" "}
-          <button
-            onClick={() => setIsLogin(!isLogin)} // Inverte o valor do isLogin (se era true vira false e vice-versa)
-            className="text-primary font-medium hover:underline"
-          >
-            {isLogin ? "Cadastre-se" : "Faça login"}
-          </button>
-        </p>
+          {mode === 'register' && (
+            <form onSubmit={handleRegister} className="grid gap-4 md:grid-cols-2">
+              <Input placeholder="Nome completo" value={registerForm.displayName} onChange={(e) => setRegisterForm((prev) => ({ ...prev, displayName: e.target.value }))} required />
+              <Input type="email" placeholder="E-mail" value={registerForm.email} onChange={(e) => setRegisterForm((prev) => ({ ...prev, email: e.target.value }))} required />
+              <Input placeholder="Telefone" value={registerForm.phone} onChange={(e) => setRegisterForm((prev) => ({ ...prev, phone: e.target.value }))} required />
+              <Input placeholder="CPF" value={registerForm.cpf} onChange={(e) => setRegisterForm((prev) => ({ ...prev, cpf: e.target.value }))} required />
+              <Input placeholder="Documento interno / matrícula" value={registerForm.documentId} onChange={(e) => setRegisterForm((prev) => ({ ...prev, documentId: e.target.value }))} required />
+              <Input placeholder="Empresa / Rede" value={registerForm.companyName} onChange={(e) => setRegisterForm((prev) => ({ ...prev, companyName: e.target.value }))} required />
+              <Input placeholder="Slug do tenant (ex: rede-centro)" value={registerForm.tenantSlug} onChange={(e) => setRegisterForm((prev) => ({ ...prev, tenantSlug: e.target.value.toLowerCase() }))} required />
+              <Input type="password" placeholder="Senha" value={registerForm.password} onChange={(e) => setRegisterForm((prev) => ({ ...prev, password: e.target.value }))} required minLength={6} />
+              <div className="md:col-span-2">
+                <Input type="password" placeholder="Confirmar senha" value={registerForm.confirmPassword} onChange={(e) => setRegisterForm((prev) => ({ ...prev, confirmPassword: e.target.value }))} required minLength={6} />
+              </div>
+              <div className="md:col-span-2 rounded-2xl bg-muted/50 p-4 text-sm text-muted-foreground">
+                Comentário importante: o slug do tenant vira a identidade lógica da empresa. Em ambiente real, isso simplifica isolamento entre clientes e futuras integrações de billing/onboarding.
+              </div>
+              <div className="md:col-span-2"><Button type="submit" className="w-full" disabled={loading}>{loading ? 'Criando conta...' : 'Criar conta e enviar verificação'}</Button></div>
+            </form>
+          )}
+
+          {mode === 'forgot' && (
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <Input type="email" placeholder="E-mail da conta" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <Button type="submit" className="w-full" disabled={loading}>{loading ? 'Enviando...' : 'Enviar link de recuperação'}</Button>
+            </form>
+          )}
+
+          {mode === 'reset' && (
+            <form onSubmit={handleResetPassword} className="space-y-4">
+              <div className="rounded-2xl bg-muted/50 p-4 text-sm text-muted-foreground flex gap-3"><KeyRound size={18} className="mt-0.5" /> Defina uma nova senha forte. O Supabase validará o token vindo do e-mail automaticamente.</div>
+              <Input type="password" placeholder="Nova senha" value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} required minLength={6} />
+              <Button type="submit" className="w-full" disabled={loading}>{loading ? 'Atualizando...' : 'Salvar nova senha'}</Button>
+            </form>
+          )}
+        </section>
       </div>
     </div>
   );

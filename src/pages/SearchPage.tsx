@@ -1,9 +1,11 @@
 import BottomNav from "@/components/BottomNav";
-import { supabase } from "@/integrations/supabase/client";
+import { apiRequest } from '@/lib/api';
 import { AnimatePresence, motion } from "framer-motion";
 import { Compass, Fuel, History, MapPin, Navigation, Search, Star, TrendingDown, X, Zap } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTenant } from '@/contexts/TenantContext';
+import type { FuelPriceRow, StationWithFuelPrices } from "@/types/app";
 
 // 📦 CATEGORIAS DE EXPLORAÇÃO (Hardcoded / Estático)
 // Deixamos isso fora do componente principal para evitar que o React 
@@ -18,11 +20,12 @@ const CATEGORIES = [
 
 const SearchPage = () => {
   const navigate = useNavigate();
+  const { activeTenant } = useTenant();
   
   // ==========================================
   // ESTADOS GERAIS DA TELA (Memória)
   // ==========================================
-  const [stations, setStations] = useState<any[]>([]); // Lista bruta que vem do Supabase
+  const [stations, setStations] = useState<StationWithFuelPrices[]>([]); // Lista bruta que vem do Supabase
   const [isLoading, setIsLoading] = useState(true);
   
   // 🔍 Estados que controlam o que o usuário quer ver
@@ -47,12 +50,8 @@ const SearchPage = () => {
     const fetchStations = async () => {
       try {
         // Trazemos os postos e já puxamos os preços atrelados a ele (`fuel_prices(*)`) numa tacada só.
-        const { data } = await supabase
-          .from("stations")
-          .select("*, fuel_prices(*)")
-          .order("created_at", { ascending: false });
-
-        if (data) setStations(data);
+        const data = await apiRequest<StationWithFuelPrices[]>('stations', { query: { tenantId: activeTenant?.id } });
+        setStations(data);
       } catch (error) {
         console.error("Erro ao buscar postos:", error);
       } finally {
@@ -60,7 +59,7 @@ const SearchPage = () => {
       }
     };
     fetchStations();
-  }, []);
+  }, [activeTenant?.id]);
 
   // ==========================================
   // FUNÇÕES DE AÇÃO DO USUÁRIO
@@ -105,14 +104,15 @@ const SearchPage = () => {
   const handleNavigate = (e: React.MouseEvent, address: string) => {
     e.stopPropagation(); // Evita clicar no card e abrir a página de detalhes por acidente
     const encodedAddress = encodeURIComponent(address); // Troca espaços por %20 pra não quebrar a URL
-    window.open(`http://googleusercontent.com/maps.google.com/3{encodedAddress}`, '_blank');
+    window.open(`https://maps.google.com/?q=${encodedAddress}`, "_blank", "noopener,noreferrer");
   };
 
   // ==========================================
   // 🧠 PIPELINE DE DADOS (Filtros e Lógica Core)
   // ==========================================
   
-  let processedStations = stations
+  const processedStations = useMemo(() =>
+    stations
     .filter(station => {
       // 🛑 REGRA ZERO: Se a barra de pesquisa estiver vazia, retorna falso e ESCONDE TODOS OS POSTOS!
       // Por quê? Porque queremos mostrar a tela "Explorar" (as 4 categorias coloridas) quando não há busca.
@@ -126,14 +126,14 @@ const SearchPage = () => {
       const matchesAddress = station.address.toLowerCase().includes(query); // 2. O Endereço
       const matchesBrand = station.brand?.toLowerCase().includes(query); // 3. A Bandeira (Ipiranga, BR)
       // 4. O Tipo de Combustível (Ex: ele digitou "gnv", procura nos preços se tem gnv)
-      const matchesFuel = station.fuel_prices?.some((fp: any) => fp.fuel_type.toLowerCase().includes(query));
+      const matchesFuel = station.fuel_prices?.some((fp: FuelPriceRow) => fp.fuel_type.toLowerCase().includes(query));
       
       // Se pelo menos uma dessas for verdade (|| = OR), o posto aparece na tela!
       return matchesName || matchesAddress || matchesBrand || matchesFuel;
     })
     .map(station => {
       // 💡 DECISÃO VISUAL: Qual preço mostrar gigantesco no card da busca?
-      const displayPriceObj = station.fuel_prices?.reduce((min: any, current: any) => {
+      const displayPriceObj = station.fuel_prices?.reduce((min: FuelPriceRow | null, current: FuelPriceRow) => {
         if (!min) return current;
         
         // Se a pessoa pesquisou por "gasolina", eu DEVO forçar a mostrar o preço da gasolina daquele posto!
@@ -145,12 +145,8 @@ const SearchPage = () => {
       
       return { ...station, displayPriceObj };
     })
-    .filter(station => station.displayPriceObj); // Proteção final: Se um posto não tem preços, não mostra.
-
-  // ==========================================
-  // 🔄 ORDENAÇÃO MATEMÁTICA DOS RESULTADOS
-  // ==========================================
-  processedStations.sort((a, b) => {
+    .filter(station => station.displayPriceObj) // Proteção final: Se um posto não tem preços, não mostra.
+    .sort((a, b) => {
     if (activeSort === "price") {
       // a - b = Ordem Crescente (do Menor Valor para o Maior)
       return Number(a.displayPriceObj.price) - Number(b.displayPriceObj.price);
@@ -158,7 +154,10 @@ const SearchPage = () => {
       // b - a = Ordem Decrescente (das Maiores Notas para as Menores)
       return Number(b.rating) - Number(a.rating);
     }
-  });
+    }),
+    // Memorizar esse pipeline evita repetir filtro + map + sort a cada tecla sem necessidade.
+    [activeSort, searchQuery, stations],
+  );
 
   // ==========================================
   // RENDERIZAÇÃO DA TELA (O HTML)

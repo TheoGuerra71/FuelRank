@@ -1,293 +1,48 @@
-import { supabase } from "@/integrations/supabase/client";
-import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, CheckCircle, MapPin, Search, Shield, ShieldAlert, ShieldCheck, Users, XCircle } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useTenant } from '@/contexts/TenantContext';
+import { apiRequest } from '@/lib/api';
+import type { AdminComplaint, ProfileRow, StationRow } from '@/types/app';
+import { AnimatePresence, motion } from 'framer-motion';
+import { AlertTriangle, ArrowLeft, CheckCircle, MapPin, Search, Shield, ShieldAlert, ShieldCheck, Users } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-// 🛡️ O Painel Administrativo: A "Central de Comando" do dono do aplicativo.
 const AdminPanel = () => {
-  // 🧭 useNavigate é usado para voltar para a tela anterior quando clicamos na setinha do topo.
   const navigate = useNavigate();
-
-  // ==========================================
-  // ESTADOS GERAIS DA TELA
-  // ==========================================
-  
-  // 🗂️ Controla qual aba está visível no momento (Postos, Usuários ou Denúncias). 
-  // Começamos sempre olhando para a aba 'postos'.
-  const [activeTab, setActiveTab] = useState("postos"); 
-  
-  // ⏳ Estado de carregamento. Enquanto busca no banco de dados, fica 'true' e mostra a bolinha girando.
+  const { activeTenant } = useTenant();
+  const [activeTab, setActiveTab] = useState('postos');
   const [isLoading, setIsLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [stations, setStations] = useState<StationRow[]>([]);
+  const [users, setUsers] = useState<ProfileRow[]>([]);
+  const [reports, setReports] = useState<AdminComplaint[]>([]);
 
-  // ==========================================
-  // ESTADOS DOS DADOS (O que vem do Banco de Dados)
-  // ==========================================
-  const [stations, setStations] = useState<any[]>([]); // Todos os postos cadastrados
-  const [users, setUsers] = useState<any[]>([]);       // Todos os usuários (para o ranking e controle)
-  const [reports, setReports] = useState<any[]>([]);   // Denúncias esperando aprovação do admin
-
-  // ==========================================
-  // BUSCA INICIAL DE DADOS (Ao abrir o painel)
-  // ==========================================
-  // ⚡ useEffect com array vazio '[]' significa: "Rode isso apenas UMA VEZ quando a tela carregar".
   useEffect(() => {
     const fetchAdminData = async () => {
       try {
-        // 1. Busca todos os Postos, ordenando dos mais recentes (created_at descending) para os mais antigos
-        const { data: stationsData } = await supabase.from("stations").select("*").order("created_at", { ascending: false });
-        if (stationsData) setStations(stationsData);
-
-        // 2. Busca todos os Usuários, ordenando dos mais pontuados para os menos pontuados
-        const { data: usersData } = await supabase.from("profiles").select("*").order("points", { ascending: false });
-        if (usersData) setUsers(usersData);
-
-        // 3. Busca Denúncias Pendentes. 
-        // ⚠️ Detalhe Mestre: Usamos .select("*, stations(name), profiles(display_name)") para fazer 
-        // um "JOIN" automático! O Supabase já traz o nome do posto e o nome do usuário 
-        // que fez a denúncia na mesma requisição, evitando buscas extras!
-        // O .catch(() => ({ data: [] })) é uma rede de segurança: se a tabela de denúncias 
-        // ainda não existir no banco, a tela não quebra, só retorna um array vazio.
-        const { data: reportsData } = await supabase.from("evaluations").select("*, stations(name), profiles(display_name)").eq("status", "pending").catch(() => ({ data: [] }));
-        if (reportsData) setReports(reportsData);
-
+        const payload = await apiRequest<{ stations: StationRow[]; users: ProfileRow[]; reports: AdminComplaint[] }>('admin/overview', { query: { tenantId: activeTenant?.id } });
+        setStations(payload.stations);
+        setUsers(payload.users);
+        setReports(payload.reports);
       } catch (error) {
-        console.error("Erro ao buscar dados do painel:", error); // Em caso de erro, avisa no F12
+        console.error('Erro ao buscar dados do painel:', error);
       } finally {
-        setIsLoading(false); // Independentemente de dar certo ou errado, desliga a bolinha de loading
+        setIsLoading(false);
       }
     };
+    void fetchAdminData();
+  }, [activeTenant?.id]);
 
-    fetchAdminData();
-  }, []);
-
-  // ==========================================
-  // AÇÕES ADMINISTRATIVAS (O Poder do Admin)
-  // ==========================================
-  
-  // 🔖 Função para alterar a "reputação" (selo) de um posto diretamente pelo painel.
-  const handleUpdateSeal = async (stationId: string, newSeal: string) => {
-    try {
-      // 1. Envia a ordem para o Supabase atualizar a coluna 'seal' lá no servidor
-      await supabase.from("stations").update({ seal: newSeal }).eq("id", stationId);
-      
-      // 2. Pulo do Gato (Otimização Otimista): Em vez de recarregar a página toda para ver a mudança,
-      // atualizamos a lista 'stations' no React na mesma hora.
-      // O 'map' varre a lista: se for o ID do posto que mudamos, atualiza o selo dele na tela.
-      setStations(stations.map(s => s.id === stationId ? { ...s, seal: newSeal } : s));
-    } catch (error) {
-      alert("Erro ao atualizar selo.");
-    }
+  const handleUpdateSeal = async (stationId: string, newSeal: StationRow['seal']) => {
+    await apiRequest(`admin/stations/${stationId}/seal`, { method: 'PATCH', body: JSON.stringify({ seal: newSeal }) });
+    setStations((currentStations) => currentStations.map((station) => station.id === stationId ? { ...station, seal: newSeal } : station));
   };
 
-  // ==========================================
-  // RENDERIZAÇÃO DA TELA
-  // ==========================================
-  return (
-    <div className="min-h-screen bg-secondary/20 pb-24 font-sans">
-      
-      {/* 🌑 CABEÇALHO DARK EXECUTIVO
-          Decidimos fazer o painel de Admin bem diferente do app do usuário comum
-          (usando fundo escuro 'bg-slate-900') para que o dono do app saiba
-          imediatamente que está num ambiente restrito. */}
-      <div className="bg-slate-900 px-4 pt-12 pb-20 rounded-b-[40px] shadow-2xl relative z-0">
-        <div className="flex items-center gap-3 mb-6">
-          <button onClick={() => navigate(-1)} className="p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors">
-            <ArrowLeft size={20} />
-          </button>
-          <div>
-            <h1 className="font-display text-2xl font-bold text-white flex items-center gap-2">
-              <Shield size={24} className="text-primary" /> Central de Comando
-            </h1>
-            <p className="text-slate-400 text-xs font-medium uppercase tracking-widest mt-1">Acesso Restrito</p>
-          </div>
-        </div>
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const filteredStations = useMemo(() => stations.filter((station) => !normalizedSearch || station.name.toLowerCase().includes(normalizedSearch) || station.address.toLowerCase().includes(normalizedSearch)), [normalizedSearch, stations]);
+  const filteredUsers = useMemo(() => users.filter((user) => !normalizedSearch || user.display_name.toLowerCase().includes(normalizedSearch)), [normalizedSearch, users]);
+  const filteredReports = useMemo(() => reports.filter((report) => !normalizedSearch || [report.description, report.stations?.name, report.profiles?.display_name].filter(Boolean).some((value) => value!.toLowerCase().includes(normalizedSearch))), [normalizedSearch, reports]);
 
-        {/* 🔍 Barra de Busca (Visual apenas, a funcionalidade real pode ser conectada depois) */}
-        <div className="relative">
-          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-          <input 
-            type="text" 
-            placeholder="Buscar ID, posto ou usuário..." 
-            className="w-full bg-slate-800/50 border border-slate-700 rounded-xl py-3 pl-11 pr-4 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-primary transition-colors"
-          />
-        </div>
-      </div>
-
-      {/* 📊 CARDS DE ESTATÍSTICAS (Visão Panorâmica)
-          Ficam "flutuando" com margem negativa '-mt-12' para sobrepor o cabeçalho escuro. */}
-      <div className="px-4 -mt-12 relative z-10">
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-background rounded-2xl p-4 shadow-lg border border-border/50 flex flex-col items-center justify-center gap-1">
-            <MapPin size={20} className="text-blue-500 mb-1" />
-            <span className="font-display font-bold text-xl text-foreground">{stations.length}</span>
-            <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Postos</span>
-          </div>
-          <div className="bg-background rounded-2xl p-4 shadow-lg border border-border/50 flex flex-col items-center justify-center gap-1">
-            <Users size={20} className="text-green-500 mb-1" />
-            <span className="font-display font-bold text-xl text-foreground">{users.length}</span>
-            <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Usuários</span>
-          </div>
-          <div className="bg-background rounded-2xl p-4 shadow-lg border border-border/50 flex flex-col items-center justify-center gap-1 relative overflow-hidden">
-            {/* Se houver denúncias, exibe uma barrinha vermelha pulsante no topo do cartão para alertar o admin! */}
-            {reports.length > 0 && <div className="absolute top-0 w-full h-1 bg-destructive animate-pulse"></div>}
-            <AlertTriangle size={20} className="text-destructive mb-1" />
-            <span className="font-display font-bold text-xl text-foreground">{reports.length}</span>
-            <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider text-center leading-tight">Denúncias Pendentes</span>
-          </div>
-        </div>
-      </div>
-
-      {/* 📑 ABAS DE NAVEGAÇÃO INTERNA
-          Botões para alternar o conteúdo da tela principal (Postos / Usuários / Denúncias) */}
-      <div className="px-4 mt-6 mb-4">
-        <div className="flex bg-muted/50 p-1 rounded-xl border border-border/50">
-          {[
-            { id: "postos", label: "Postos", icon: <MapPin size={16}/> },
-            { id: "usuarios", label: "Usuários", icon: <Users size={16}/> },
-            { id: "denuncias", label: "Denúncias", icon: <ShieldAlert size={16}/> }
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg transition-all ${activeTab === tab.id ? 'bg-background text-foreground shadow-sm border border-border/50' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              {tab.icon} {tab.label}
-              {/* Badge vermelha na aba de denúncias se houver pendências (Atenção extra!) */}
-              {tab.id === 'denuncias' && reports.length > 0 && (
-                <span className="bg-destructive text-white text-[10px] px-1.5 py-0.5 rounded-full">{reports.length}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* 📦 CONTEÚDO DINÂMICO DAS ABAS */}
-      <div className="px-4 space-y-4">
-        {isLoading ? (
-          // Spinner de carregamento padrão
-          <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div></div>
-        ) : (
-          // AnimatePresence permite animações de "entrada" e "saída" quando trocamos de aba (framer-motion)
-          <AnimatePresence mode="wait">
-            
-            {/* =======================
-                ABA 1: GESTÃO DE POSTOS 
-                ======================= */}
-            {activeTab === "postos" && (
-              <motion.div key="postos" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-3">
-                {stations.map((station) => (
-                  <div key={station.id} className="bg-background border border-border rounded-xl p-4 shadow-sm flex flex-col gap-3">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h3 className="font-bold text-sm text-foreground">{station.name}</h3>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">{station.address}</p>
-                      </div>
-                      
-                      {/* Lógica Visual de Cores para o Selo de Qualidade do Posto */}
-                      {station.seal === 'trusted' ? (
-                        <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1"><ShieldCheck size={12}/> Confiável</span>
-                      ) : station.seal === 'complaints' ? (
-                        <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1"><AlertTriangle size={12}/> Denunciado</span>
-                      ) : (
-                        <span className="bg-yellow-100 text-yellow-700 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1"><ShieldAlert size={12}/> Observação</span>
-                      )}
-                    </div>
-
-                    <hr className="border-border/50" />
-                    
-                    {/* Botões que chamam a função 'handleUpdateSeal' com o novo status.
-                        O estilo condicional (ternário) deixa o botão preenchido se ele já for o status atual. */}
-                    <div className="flex gap-2">
-                      <button onClick={() => handleUpdateSeal(station.id, 'trusted')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-colors border ${station.seal === 'trusted' ? 'bg-green-500 text-white border-green-500' : 'bg-transparent text-muted-foreground border-border hover:bg-green-50'}`}>
-                        Tornar Confiável
-                      </button>
-                      <button onClick={() => handleUpdateSeal(station.id, 'complaints')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-colors border ${station.seal === 'complaints' ? 'bg-destructive text-white border-destructive' : 'bg-transparent text-muted-foreground border-border hover:bg-red-50'}`}>
-                        Marcar Fraude
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </motion.div>
-            )}
-
-            {/* =======================
-                ABA 2: GESTÃO DE USUÁRIOS 
-                ======================= */}
-            {activeTab === "usuarios" && (
-              <motion.div key="usuarios" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-3">
-                {users.map((user) => (
-                  <div key={user.id} className="bg-background border border-border rounded-xl p-3 flex items-center gap-4 shadow-sm">
-                    {/* Avatar gerado automaticamente com a primeira letra do nome */}
-                    <div className="w-10 h-10 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center font-bold font-display">
-                      {user.display_name?.charAt(0).toUpperCase() || "U"}
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-sm text-foreground">{user.display_name || "Usuário Anônimo"}</h3>
-                      <p className="text-[10px] text-muted-foreground font-medium">{user.influence_level || "Iniciante"}</p>
-                    </div>
-                    {/* Badge de pontuação gamificada */}
-                    <div className="text-right">
-                      <span className="bg-orange-100 text-orange-600 font-bold text-xs px-2 py-1 rounded-lg">{user.points || 0} pts</span>
-                    </div>
-                  </div>
-                ))}
-              </motion.div>
-            )}
-
-            {/* =======================
-                ABA 3: CAIXA DE DENÚNCIAS 
-                ======================= */}
-            {activeTab === "denuncias" && (
-              <motion.div key="denuncias" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-3">
-                
-                {/* Condicional: Tem denúncia? Lista elas. Se não, mostra a mensagem de paz! */}
-                {reports.length > 0 ? reports.map((report) => (
-                  <div key={report.id} className="bg-background border-2 border-destructive/20 rounded-xl p-4 shadow-sm relative overflow-hidden">
-                    {/* Detalhe estético: Barra lateral vermelha indicando urgência */}
-                    <div className="absolute top-0 left-0 w-1 h-full bg-destructive"></div>
-                    
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
-                        <AlertTriangle size={16} className="text-destructive"/> Fraude Reportada
-                      </h3>
-                      {/* Converte a data do banco (ISO string) para formato brasileiro padrão */}
-                      <span className="text-[10px] text-muted-foreground">{new Date(report.created_at).toLocaleDateString()}</span>
-                    </div>
-                    
-                    {/* Caixa com o detalhe do que aconteceu (Graças ao 'JOIN' lá no início, temos os nomes aqui) */}
-                    <div className="bg-muted/50 p-3 rounded-lg text-xs text-foreground mb-3 space-y-1 border border-border/50">
-                      <p><span className="font-bold text-muted-foreground">Posto:</span> {report.stations?.name || "Desconhecido"}</p>
-                      <p><span className="font-bold text-muted-foreground">Usuário:</span> {report.profiles?.display_name || "Anônimo"}</p>
-                      <p><span className="font-bold text-muted-foreground">Relato:</span> "{report.comment || "Sem comentário"}"</p>
-                    </div>
-
-                    {/* Botões visuais (A lógica de aprovar/descartar pode ser conectada aqui no futuro) */}
-                    <div className="flex gap-2">
-                      <button className="flex-1 bg-green-500 text-white font-bold text-xs py-2.5 rounded-lg flex items-center justify-center gap-1 active:scale-95 shadow-sm">
-                        <CheckCircle size={14}/> Aprovar Punição
-                      </button>
-                      <button className="flex-1 bg-slate-200 text-slate-700 font-bold text-xs py-2.5 rounded-lg flex items-center justify-center gap-1 active:scale-95">
-                        <XCircle size={14}/> Descartar
-                      </button>
-                    </div>
-                  </div>
-                )) : (
-                  // Empty State: Quando o administrador zera a caixa de entrada (Paz de espírito)
-                  <div className="text-center py-16 px-4 bg-background rounded-2xl border border-dashed border-border">
-                    <CheckCircle size={32} className="text-green-500 mx-auto mb-3 opacity-50"/>
-                    <h3 className="font-bold text-foreground text-sm">Tudo tranquilo por aqui!</h3>
-                    <p className="text-xs text-muted-foreground mt-1">Nenhuma denúncia pendente de análise.</p>
-                  </div>
-                )}
-              </motion.div>
-            )}
-
-          </AnimatePresence>
-        )}
-      </div>
-    </div>
-  );
+  return <div className="min-h-screen bg-secondary/20 pb-24 font-sans"><div className="bg-slate-900 px-4 pt-12 pb-20 rounded-b-[40px] shadow-2xl relative z-0"><div className="flex items-center gap-3 mb-6"><button onClick={() => navigate(-1)} className="p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors"><ArrowLeft size={20} /></button><div><h1 className="font-display text-2xl font-bold text-white flex items-center gap-2"><Shield size={24} className="text-primary" /> Central de Comando</h1><p className="text-slate-400 text-xs font-medium uppercase tracking-widest mt-1">Tenant: {activeTenant?.name ?? 'Sem tenant'}</p></div></div><div className="relative"><Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" /><input type="text" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Buscar posto, usuário ou denúncia..." className="w-full bg-slate-800/50 border border-slate-700 rounded-xl py-3 pl-11 pr-4 text-sm text-white" /></div></div><div className="px-4 -mt-12 relative z-10"><div className="grid grid-cols-3 gap-3"><div className="bg-background rounded-2xl p-4 shadow-lg border border-border/50 flex flex-col items-center"><MapPin size={20} className="text-blue-500 mb-1" /><span className="font-display font-bold text-xl">{stations.length}</span><span className="text-[10px] text-muted-foreground font-bold uppercase">Postos</span></div><div className="bg-background rounded-2xl p-4 shadow-lg border border-border/50 flex flex-col items-center"><Users size={20} className="text-green-500 mb-1" /><span className="font-display font-bold text-xl">{users.length}</span><span className="text-[10px] text-muted-foreground font-bold uppercase">Usuários</span></div><div className="bg-background rounded-2xl p-4 shadow-lg border border-border/50 flex flex-col items-center"><AlertTriangle size={20} className="text-destructive mb-1" /><span className="font-display font-bold text-xl">{reports.length}</span><span className="text-[10px] text-muted-foreground font-bold uppercase">Denúncias</span></div></div></div><div className="px-4 mt-6 mb-4"><div className="flex bg-muted/50 p-1 rounded-xl border border-border/50">{[{ id: 'postos', label: 'Postos', icon: <MapPin size={16} /> }, { id: 'usuarios', label: 'Usuários', icon: <Users size={16} /> }, { id: 'denuncias', label: 'Denúncias', icon: <ShieldAlert size={16} /> }].map((tab) => <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg ${activeTab === tab.id ? 'bg-background text-foreground shadow-sm border border-border/50' : 'text-muted-foreground'}`}>{tab.icon} {tab.label}</button>)}</div></div><div className="px-4 space-y-4">{isLoading ? <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div></div> : <AnimatePresence mode="wait">{activeTab === 'postos' && <motion.div key="postos" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">{filteredStations.map((station) => <div key={station.id} className="bg-background border border-border rounded-xl p-4 shadow-sm flex flex-col gap-3"><div className="flex justify-between items-start"><div><h3 className="font-bold text-sm">{station.name}</h3><p className="text-[10px] text-muted-foreground">{station.address}</p></div>{station.seal === 'trusted' ? <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1"><ShieldCheck size={12} /> Confiável</span> : <span className="bg-yellow-100 text-yellow-700 text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1"><ShieldAlert size={12} /> Observação</span>}</div><div className="flex gap-2"><button onClick={() => handleUpdateSeal(station.id, 'trusted')} className="flex-1 py-2 rounded-lg text-xs font-bold border">Tornar confiável</button><button onClick={() => handleUpdateSeal(station.id, 'complaints')} className="flex-1 py-2 rounded-lg text-xs font-bold border">Marcar fraude</button></div></div>)}</motion.div>}{activeTab === 'usuarios' && <motion.div key="usuarios" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">{filteredUsers.map((user) => <div key={user.id} className="bg-background border border-border rounded-xl p-3 flex items-center gap-4 shadow-sm"><div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold">{user.display_name?.charAt(0)?.toUpperCase() || 'U'}</div><div className="flex-1"><p className="font-bold text-sm">{user.display_name}</p><p className="text-[10px] text-muted-foreground">{user.influence_level}</p></div></div>)}</motion.div>}{activeTab === 'denuncias' && <motion.div key="denuncias" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">{filteredReports.map((report) => <div key={report.id} className="bg-background border border-border rounded-xl p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div><h3 className="font-bold text-sm">{report.stations?.name ?? 'Posto não encontrado'}</h3><p className="text-[10px] text-muted-foreground">Enviado por {report.profiles?.display_name ?? 'Usuário'}</p></div><span className="bg-yellow-100 text-yellow-700 text-[10px] font-bold px-2 py-1 rounded">Pendente</span></div><p className="text-sm mt-3">{report.description}</p><div className="grid grid-cols-2 gap-2 mt-3"><a href={report.proof_url} target="_blank" rel="noreferrer" className="text-center py-2 rounded-lg border border-border text-xs font-bold hover:bg-muted/50">Ver prova</a><button className="py-2 rounded-lg bg-slate-100 text-slate-700 text-xs font-bold inline-flex items-center justify-center gap-1" disabled><CheckCircle size={14} /> Fluxo preparado</button></div></div>)}</motion.div>}</AnimatePresence>}</div></div>;
 };
 
 export default AdminPanel;

@@ -1,9 +1,11 @@
 import BottomNav from "@/components/BottomNav";
-import { supabase } from "@/integrations/supabase/client";
+import { apiRequest } from '@/lib/api';
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, Clock, Heart, MapPin, Navigation, Search, ShieldAlert, ShieldCheck, SlidersHorizontal, Star, X, Zap } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTenant } from '@/contexts/TenantContext';
+import type { FuelPriceRow, StationWithFuelPrices } from "@/types/app";
 
 // 🏷️ DICIONÁRIO ESTÁTICO DE FILTROS
 // Por que isso está FORA do componente Index?
@@ -22,12 +24,13 @@ const FILTERS = [
 const Index = () => {
   // 🧭 O Hook de navegação padrão do React Router para trocarmos de tela
   const navigate = useNavigate();
+  const { activeTenant } = useTenant();
   
   // ==========================================
   // ESTADOS PRINCIPAIS (Memória da Tela)
   // ==========================================
   // 'stations' guarda a resposta bruta que vem do nosso banco de dados (Supabase)
-  const [stations, setStations] = useState<any[]>([]); 
+  const [stations, setStations] = useState<StationWithFuelPrices[]>([]); 
   const [isLoading, setIsLoading] = useState(true); // Controla a bolinha girando de carregamento
   
   // 🔍 Filtros que ficam visíveis o tempo todo
@@ -65,12 +68,8 @@ const Index = () => {
         // embutidos dentro do objeto do posto. 
         // Em vez de fazer 1 requisição para pegar o posto e mais 5 para pegar os preços,
         // matamos tudo em 1 requisição só! Otimização monstra.
-        const { data, error } = await supabase
-          .from("stations")
-          .select("*, fuel_prices(*)")
-          .order("created_at", { ascending: false }); // Traz os mais novos primeiro
-
-        if (data) setStations(data);
+        const data = await apiRequest<StationWithFuelPrices[]>('stations', { query: { tenantId: activeTenant?.id } });
+        setStations(data);
       } catch (error) {
         console.error("Erro ao buscar postos:", error);
       } finally {
@@ -78,7 +77,7 @@ const Index = () => {
       }
     };
     fetchStations();
-  }, []);
+  }, [activeTenant?.id]);
 
   // ==========================================
   // INTERAÇÕES DE CLIQUE
@@ -113,7 +112,7 @@ const Index = () => {
     // 🔗 encodeURIComponent: Se o endereço for "Av. João XXIII", ele transforma 
     // os espaços e acentos em códigos (Ex: Av.%20Jo%C3%A3o) pra URL do Google não quebrar.
     const encodedAddress = encodeURIComponent(address);
-    window.open(`https://maps.google.com/?q=$${encodedAddress}`, '_blank');
+    window.open(`https://maps.google.com/?q=${encodedAddress}`, "_blank", "noopener,noreferrer");
   };
 
   // ==========================================
@@ -121,7 +120,8 @@ const Index = () => {
   // ==========================================
   // Aqui pegamos a lista bruta e aplicamos as regras em tempo real no celular da pessoa.
   
-  let processedStations = stations
+  const processedStations = useMemo(() =>
+    stations
     .filter(station => {
       // PASSO 1: O que ele digitou bate com o nome ou endereço do posto? (Transforma tudo em minúsculo pra comparar)
       const matchesSearch = station.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -134,7 +134,7 @@ const Index = () => {
       // PASSO 3: O cara clicou em "Etanol" lá em cima? 
       if (activeFilter !== "todos" && activeFilter !== "favoritos") {
         // O '.some()' checa se existe pelo menos um preço daquele combustível cadastrado pra esse posto.
-        const hasFuel = station.fuel_prices?.some((fp: any) => fp.fuel_type === activeFilter);
+        const hasFuel = station.fuel_prices?.some((fp: FuelPriceRow) => fp.fuel_type === activeFilter);
         if (!hasFuel) return false; // Se não tem esse combustível, tchau posto.
       }
 
@@ -150,11 +150,11 @@ const Index = () => {
       
       if (activeFilter !== "todos" && activeFilter !== "favoritos") {
         // Se a pessoa filtrou por "Diesel", eu DEVO mostrar o valor do Diesel no card!
-        displayPriceObj = station.fuel_prices?.find((fp: any) => fp.fuel_type === activeFilter);
+        displayPriceObj = station.fuel_prices?.find((fp: FuelPriceRow) => fp.fuel_type === activeFilter);
       } else {
         // Se ele tá vendo "Todos", eu tento mostrar o GNV primeiro (pois é o foco do motorista de app).
         // Se esse posto não tiver GNV, o '||' joga o primeiro combustível que ele achar no array (índice [0]).
-        displayPriceObj = station.fuel_prices?.find((fp: any) => fp.fuel_type === 'gnv') || station.fuel_prices?.[0];
+        displayPriceObj = station.fuel_prices?.find((fp: FuelPriceRow) => fp.fuel_type === 'gnv') || station.fuel_prices?.[0];
       }
       
       // Embute a nossa escolha final dentro do objeto do posto e manda pra frente.
@@ -162,13 +162,8 @@ const Index = () => {
     })
     // Proteção de segurança: Vai que um posto acabou de ser criado e o dono não cadastrou preço nenhum ainda?
     // Removemos ele da tela para não quebrar a interface tentando mostrar um preço que não existe.
-    .filter(station => station.displayPriceObj); 
-
-  // ==========================================
-  // 🔄 ORDENAÇÃO MATEMÁTICA
-  // ==========================================
-  // O 'sort' muda o array processado diretamente (mutação local é ok aqui).
-  processedStations.sort((a, b) => {
+    .filter(station => station.displayPriceObj)
+    .sort((a, b) => {
     if (sortBy === "price") {
       // (a - b) organiza do menor para o maior (Crescente)
       return Number(a.displayPriceObj.price) - Number(b.displayPriceObj.price); 
@@ -177,7 +172,11 @@ const Index = () => {
       return Number(b.rating) - Number(a.rating); 
     }
     return 0;
-  });
+    }),
+    // O useMemo evita recalcular toda a lista quando nada que influencia o resultado mudou.
+    // Isso reduz renderizações pesadas nas telas com busca, favoritos e ordenação.
+    [activeFilter, favorites, hideReported, searchQuery, sortBy, stations],
+  );
 
   // ==========================================
   // 🏆 DESCOBRINDO O MAIS BARATO DO BAIRRO
