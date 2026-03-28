@@ -25,7 +25,7 @@ const SearchPage = () => {
   // ==========================================
   // ESTADOS GERAIS DA TELA (Memória)
   // ==========================================
-  const [stations, setStations] = useState<StationWithFuelPrices[]>([]); // Lista bruta que vem do Supabase
+  const [stations, setStations] = useState<StationWithFuelPrices[]>([]); // Resposta de GET /api/stations
   const [isLoading, setIsLoading] = useState(true);
   
   // 🔍 Estados que controlam o que o usuário quer ver
@@ -49,7 +49,6 @@ const SearchPage = () => {
   useEffect(() => {
     const fetchStations = async () => {
       try {
-        // Trazemos os postos e já puxamos os preços atrelados a ele (`fuel_prices(*)`) numa tacada só.
         const data = await apiRequest<StationWithFuelPrices[]>('stations', { query: { tenantId: activeTenant?.id } });
         setStations(data);
       } catch (error) {

@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 const Profile = () => {
-  const { signOut, user, updateProfile } = useAuth();
+  const { signOut, user, updateProfile, isAdmin } = useAuth();
   const { tenants, activeTenant, setActiveTenantId } = useTenant();
   const navigate = useNavigate();
   const [profile, setProfile] = useState<ProfileRow | null>(null);
@@ -107,6 +107,15 @@ const Profile = () => {
           </div>
           <div className="h-2.5 bg-secondary rounded-full overflow-hidden mt-4"><motion.div initial={{ width: 0 }} animate={{ width: `${progressPercent}%` }} className="h-full bg-gradient-to-r from-primary to-orange-400 rounded-full" /></div>
         </motion.div>
+
+        {isAdmin && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-primary/30 rounded-2xl p-5 shadow-sm">
+            <Button type="button" variant="default" className="w-full gap-2" onClick={() => navigate('/admin')}>
+              <Shield size={18} /> Central do administrador
+            </Button>
+            <p className="text-xs text-muted-foreground mt-2 text-center">Moderação, preços de referência e denúncias.</p>
+          </motion.div>
+        )}
 
         <motion.form initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} onSubmit={handleSave} className="bg-card border border-border rounded-2xl p-5 shadow-sm space-y-4">
           <div>

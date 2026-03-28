@@ -44,7 +44,7 @@ const AddStation = () => {
       // Toda gravação vai para a API REST, que por sua vez pode usar PostgreSQL puro no backend.
       const station = await apiRequest<{ id: string }>('stations', {
         method: 'POST',
-        body: JSON.stringify({
+        body: {
           tenant_id: activeTenant.id,
           name,
           brand,
@@ -54,7 +54,7 @@ const AddStation = () => {
           has_promotion: hasPromotion,
           promotion_text: hasPromotion ? promotionText : null,
           prices: selectedFuels.map(([fuelId, data]) => ({ fuel_type: fuelId as FuelType, price: Number(data.price.replace(',', '.')) })),
-        }),
+        },
       });
       alert('Posto cadastrado com sucesso!');
       navigate(`/station/${station.id}`);

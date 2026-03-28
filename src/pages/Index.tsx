@@ -29,8 +29,8 @@ const Index = () => {
   // ==========================================
   // ESTADOS PRINCIPAIS (Memória da Tela)
   // ==========================================
-  // 'stations' guarda a resposta bruta que vem do nosso banco de dados (Supabase)
-  const [stations, setStations] = useState<StationWithFuelPrices[]>([]); 
+  // Lista bruta vinda do backend Node (`GET /api/stations`) já com `fuel_prices` embutidos.
+  const [stations, setStations] = useState<StationWithFuelPrices[]>([]);
   const [isLoading, setIsLoading] = useState(true); // Controla a bolinha girando de carregamento
   
   // 🔍 Filtros que ficam visíveis o tempo todo
@@ -56,18 +56,12 @@ const Index = () => {
   const [hideReported, setHideReported] = useState(false); // Chave de segurança para sumir com postos denunciados
 
   // ==========================================
-  // CHAMADA DE API (Supabase)
+  // CHAMADA À API (Express + Prisma)
   // ==========================================
-  // Esse useEffect roda logo que a tela é montada (graças ao array vazio [] no final).
   useEffect(() => {
     const fetchStations = async () => {
       try {
-        // ⚡ MÁGICA DE BANCO DE DADOS: O JOIN IMPLÍCITO DO POSTGREST
-        // Nós pedimos "stations" e, na mesma frase, mandamos trazer `fuel_prices(*)`.
-        // O Supabase entende que as tabelas são ligadas e já traz todos os preços 
-        // embutidos dentro do objeto do posto. 
-        // Em vez de fazer 1 requisição para pegar o posto e mais 5 para pegar os preços,
-        // matamos tudo em 1 requisição só! Otimização monstra.
+        // Uma única ida ao servidor: o Prisma faz `include: { fuelPrices }` e serializa como `fuel_prices`.
         const data = await apiRequest<StationWithFuelPrices[]>('stations', { query: { tenantId: activeTenant?.id } });
         setStations(data);
       } catch (error) {

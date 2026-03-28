@@ -1,5 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+/**
+ * Hook opcional para listar postos via API REST (legado p/ componentes que esperam `prices` humanizado).
+ * A Home principal (`Index`) usa `apiRequest` direto — mantemos este arquivo tipado para `StationCard` e similares.
+ */
+
+import { apiRequest } from '@/lib/api';
+import type { StationWithFuelPrices } from '@/types/app';
+import { useQuery } from '@tanstack/react-query';
 
 export interface StationWithPrices {
   id: string;
@@ -10,7 +16,7 @@ export interface StationWithPrices {
   review_count: number;
   has_promotion: boolean;
   promotion_text: string | null;
-  seal: "trusted" | "observation" | "complaints";
+  seal: 'trusted' | 'observation' | 'complaints';
   complaints_count: number;
   lat: number;
   lng: number;
@@ -22,44 +28,45 @@ export interface StationWithPrices {
 }
 
 const fuelTypeLabels: Record<string, string> = {
-  gasolina_comum: "Gasolina Comum",
-  gasolina_aditivada: "Gasolina Aditivada",
-  etanol: "Etanol",
-  diesel: "Diesel",
-  gnv: "GNV",
+  gasolina_comum: 'Gasolina Comum',
+  gasolina_aditivada: 'Gasolina Aditivada',
+  etanol: 'Etanol',
+  diesel: 'Diesel',
+  gnv: 'GNV',
 };
 
-export const useStations = (fuelFilter: string, search: string) => {
+/** Converte o payload da API (`fuel_prices` + enums) para o formato antigo do card. */
+function mapToStationWithPrices(s: StationWithFuelPrices): StationWithPrices {
+  const rawPrices = s.fuel_prices ?? [];
+  return {
+    id: s.id,
+    name: s.name,
+    brand: s.brand,
+    address: s.address,
+    rating: s.rating,
+    review_count: s.review_count,
+    has_promotion: Boolean((s as { has_promotion?: boolean }).has_promotion),
+    promotion_text: (s as { promotion_text?: string | null }).promotion_text ?? null,
+    seal: s.seal as StationWithPrices['seal'],
+    complaints_count: s.complaints_count,
+    lat: s.lat,
+    lng: s.lng,
+    prices: rawPrices.map((p) => ({
+      fuel_type: fuelTypeLabels[p.fuel_type] || p.fuel_type,
+      price: Number(p.price),
+      updated_at: typeof p.updated_at === 'string' ? p.updated_at : new Date().toISOString(),
+    })),
+  };
+}
+
+export const useStations = (fuelFilter: string, search: string, tenantId?: string | null) => {
   return useQuery({
-    queryKey: ["stations", fuelFilter, search],
+    queryKey: ['stations', fuelFilter, search, tenantId],
     queryFn: async (): Promise<StationWithPrices[]> => {
-      const { data: stations, error } = await supabase
-        .from("stations")
-        .select("*")
-        .order("rating", { ascending: false });
-
-      if (error) throw error;
-
-      const { data: prices } = await supabase
-        .from("fuel_prices")
-        .select("station_id, fuel_type, price, updated_at");
-
-      const priceMap = new Map<string, StationWithPrices["prices"]>();
-      (prices || []).forEach((p) => {
-        const arr = priceMap.get(p.station_id) || [];
-        arr.push({
-          fuel_type: fuelTypeLabels[p.fuel_type] || p.fuel_type,
-          price: Number(p.price),
-          updated_at: p.updated_at,
-        });
-        priceMap.set(p.station_id, arr);
+      const rows = await apiRequest<StationWithFuelPrices[]>('stations', {
+        query: tenantId ? { tenantId } : {},
       });
-
-      let result = (stations || []).map((s) => ({
-        ...s,
-        seal: s.seal as "trusted" | "observation" | "complaints",
-        prices: priceMap.get(s.id) || [],
-      }));
+      let result = rows.map(mapToStationWithPrices);
 
       if (search) {
         const q = search.toLowerCase();
@@ -67,13 +74,13 @@ export const useStations = (fuelFilter: string, search: string) => {
           (s) =>
             s.name.toLowerCase().includes(q) ||
             s.address.toLowerCase().includes(q) ||
-            s.brand.toLowerCase().includes(q)
+            s.brand.toLowerCase().includes(q),
         );
       }
 
-      if (fuelFilter !== "Todos") {
+      if (fuelFilter !== 'Todos') {
         result = result.filter((s) =>
-          s.prices.some((p) => p.fuel_type.toLowerCase().includes(fuelFilter.toLowerCase()))
+          s.prices.some((p) => p.fuel_type.toLowerCase().includes(fuelFilter.toLowerCase())),
         );
       }
 

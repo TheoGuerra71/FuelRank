@@ -51,7 +51,7 @@ const Ranking = () => {
               { id: '5', display_name: 'Mariana Costa', points: 150, influence_level: 'Iniciante', total_refuels: 3 },
             ]);
           } else {
-            setUsers(data); // Usa os dados reais do Supabase
+            setUsers(data);
           }
         }
       } catch (error) {

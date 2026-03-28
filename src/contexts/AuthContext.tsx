@@ -1,4 +1,5 @@
 import { apiRequest } from '@/lib/api';
+import { setAccessToken } from '@/lib/axiosClient';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 
 interface AuthError {
@@ -13,6 +14,13 @@ interface User {
 
 interface Session {
   user: User;
+}
+
+/** Resposta do bootstrap de sessão: o backend pode devolver um JWT para regravar o localStorage. */
+interface AuthBootstrapPayload {
+  session: Session | null;
+  isAdmin: boolean;
+  accessToken?: string | null;
 }
 
 interface SignUpPayload {
@@ -67,15 +75,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const loadSession = async () => {
     setLoading(true);
-    const { data, error } = await withErrorBoundary(() => apiRequest<{ session: Session | null; isAdmin: boolean }>('auth/session'));
+    const { data, error } = await withErrorBoundary(() => apiRequest<AuthBootstrapPayload>('auth/session'));
     if (!error && data) {
       setSession(data.session);
       setUser(data.session?.user ?? null);
       setIsAdmin(data.isAdmin);
+      // Se o servidor ecoar um token (ou renovar), mantemos o client Axios sincronizado.
+      if (data.accessToken) setAccessToken(data.accessToken);
     } else {
       setSession(null);
       setUser(null);
       setIsAdmin(false);
+      setAccessToken(null);
     }
     setLoading(false);
   };
@@ -86,48 +97,78 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signIn = async (email: string, password: string) => {
     const { error } = await withErrorBoundary(async () => {
-      const payload = await apiRequest<{ session: Session; isAdmin: boolean }>('auth/login', {
+      const payload = await apiRequest<{ session: Session; isAdmin: boolean; accessToken?: string }>('auth/login', {
         method: 'POST',
-        body: JSON.stringify({ email, password }),
+        body: { email, password },
       });
       setSession(payload.session);
       setUser(payload.session.user);
       setIsAdmin(payload.isAdmin);
+      // O interceptor do Axios passa a enviar Authorization em todas as rotas (incluindo admin).
+      if (payload.accessToken) setAccessToken(payload.accessToken);
       return payload;
     });
     return { error };
   };
 
   const signUp = async (payload: SignUpPayload) => {
-    const { error } = await withErrorBoundary(() => apiRequest('auth/register', { method: 'POST', body: JSON.stringify(payload) }));
+    const { error } = await withErrorBoundary(async () => {
+      /**
+       * O backend aceita `{ name, email, password }` e campos extras do formulário.
+       * Enviamos `name` + `displayName` (redundante) para compatibilidade com validação Zod.
+       */
+      const res = await apiRequest<{ accessToken?: string; session: Session; isAdmin: boolean }>('auth/register', {
+        method: 'POST',
+        body: {
+          name: payload.displayName,
+          displayName: payload.displayName,
+          email: payload.email,
+          password: payload.password,
+          phone: payload.phone,
+          cpf: payload.cpf,
+          documentId: payload.documentId,
+          companyName: payload.companyName,
+          tenantSlug: payload.tenantSlug,
+        },
+      });
+      if (res.accessToken) setAccessToken(res.accessToken);
+      setSession(res.session);
+      setUser(res.session.user);
+      setIsAdmin(res.isAdmin);
+      return res;
+    });
     return { error };
   };
 
   const requestPasswordReset = async (email: string) => {
-    const { error } = await withErrorBoundary(() => apiRequest('auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }));
+    const { error } = await withErrorBoundary(() => apiRequest('auth/forgot-password', { method: 'POST', body: { email } }));
     return { error };
   };
 
   const updatePassword = async (password: string) => {
-    const { error } = await withErrorBoundary(() => apiRequest('auth/reset-password', { method: 'POST', body: JSON.stringify({ password }) }));
+    const { error } = await withErrorBoundary(() => apiRequest('auth/reset-password', { method: 'POST', body: { password } }));
     return { error };
   };
 
   const updateProfile = async (payload: ProfilePayload) => {
-    const { error } = await withErrorBoundary(() => apiRequest('profile', { method: 'PUT', body: JSON.stringify(payload) }));
+    const { error } = await withErrorBoundary(() => apiRequest('profile', { method: 'PUT', body: payload }));
     return { error };
   };
 
   const resendVerificationEmail = async (email: string) => {
-    const { error } = await withErrorBoundary(() => apiRequest('auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) }));
+    const { error } = await withErrorBoundary(() => apiRequest('auth/resend-verification', { method: 'POST', body: { email } }));
     return { error };
   };
 
   const signOut = async () => {
-    await apiRequest('auth/logout', { method: 'POST' });
-    setSession(null);
-    setUser(null);
-    setIsAdmin(false);
+    try {
+      await apiRequest('auth/logout', { method: 'POST' });
+    } finally {
+      setAccessToken(null);
+      setSession(null);
+      setUser(null);
+      setIsAdmin(false);
+    }
   };
 
   return (
