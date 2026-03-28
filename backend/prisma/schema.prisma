@@ -1,0 +1,190 @@
+// ----------------------------------------------------------------------------
+// Schema Prisma — FuelRank (PostgreSQL)
+// ----------------------------------------------------------------------------
+// Por que enums explícitos?
+// - Garantimos que o banco, o Prisma Client e o contrato REST falem a mesma língua
+//   (ex.: status de denúncia `in_analysis` bate com o Zod nas rotas admin).
+// ----------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum FuelType {
+  gasolina_comum
+  gasolina_aditivada
+  etanol
+  diesel
+  gnv
+}
+
+enum SealStatus {
+  trusted
+  observation
+  complaints
+}
+
+enum StationApprovalStatus {
+  pending
+  approved
+  rejected
+}
+
+enum ComplaintStatus {
+  pending
+  in_analysis
+  resolved
+  archived
+  /// Denúncia validada pelo time — aparece em "Fraudes confirmadas" na ficha do posto.
+  approved
+}
+
+/// Papel do usuário no ecossistema (motorista x equipe interna).
+enum UserRole {
+  DRIVER
+  ADMIN
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  /// Hash bcrypt — nunca armazenamos senha em texto puro.
+  passwordHash String
+  /// Flag usada pelo JWT e pelo painel admin (requireAdmin).
+  isAdmin      Boolean  @default(false)
+  /// Motoristas padrão: DRIVER; contas internas podem ser ADMIN alinhado ao seed.
+  role         UserRole @default(DRIVER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  profile      Profile?
+  memberships  TenantMembership[]
+  reviews      Review[]
+  complaints   Complaint[]
+}
+
+model Profile {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  display_name    String
+  phone           String?
+  cpf             String?
+  influence_level String   @default("Iniciante")
+  points          Int      @default(0)
+  /// Contagem exibida no app como “total de abastecimentos” (incrementada ao registrar avaliação).
+  totalRefuels    Int      @default(0)
+  avatar_url      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stations              Station[]
+  memberships           TenantMembership[]
+  referenceFuelPrices   TenantReferenceFuelPrice[]
+}
+
+model TenantMembership {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  role      String   @default("member")
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+}
+
+model Station {
+  id               String                  @id @default(uuid())
+  tenantId         String?
+  tenant           Tenant?                 @relation(fields: [tenantId], references: [id])
+  name             String
+  brand            String                  @default("")
+  address          String
+  lat              Float
+  lng              Float
+  seal             SealStatus              @default(observation)
+  /// Fila de moderação: só `approved` aparece no mapa público após você validar o cadastro.
+  approvalStatus   StationApprovalStatus   @default(pending)
+  rating           Float                   @default(0)
+  reviewCount      Int                     @default(0)
+  complaintsCount  Int                     @default(0)
+  hasPromotion     Boolean                 @default(false)
+  promotionText    String?
+  photos           String[]                @default([])
+  cnpj             String?
+  createdBy        String?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  fuelPrices FuelPrice[]
+  reviews    Review[]
+  complaints Complaint[]
+}
+
+model FuelPrice {
+  id        String   @id @default(uuid())
+  stationId String
+  station   Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  fuelType  FuelType
+  price     Decimal  @db.Decimal(12, 3)
+  updatedAt DateTime @updatedAt
+
+  @@unique([stationId, fuelType])
+}
+
+model TenantReferenceFuelPrice {
+  id       String   @id @default(uuid())
+  tenantId String
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fuelType FuelType
+  price    Decimal  @db.Decimal(12, 3)
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, fuelType])
+}
+
+model Review {
+  id           String   @id @default(uuid())
+  stationId    String
+  station      Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  comment      String?
+  rating       Int
+  proofUrl     String   @default("")
+  isVerified   Boolean  @default(false)
+  helpfulCount Int      @default(0)
+  createdAt    DateTime @default(now())
+}
+
+model Complaint {
+  id            String          @id @default(uuid())
+  stationId     String
+  station       Station         @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  userId        String?
+  user          User?           @relation(fields: [userId], references: [id])
+  description   String
+  status        ComplaintStatus @default(pending)
+  proofUrl      String          @default("")
+  fuelType      FuelType?
+  refuelingDate DateTime?
+  videoUrl      String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
