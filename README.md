@@ -127,4 +127,4 @@ Este projeto está sob a licença [MIT](https://opensource.org/licenses/MIT).
 ## 👨‍💻 Autor
 
 **Theo Guerra** Estudante de Análise e Desenvolvimento de Sistemas  
-📍 Rio de Janeiro - RJ
+📍 Rio de Janeiro - Brasil
