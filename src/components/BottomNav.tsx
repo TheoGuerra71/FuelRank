@@ -21,6 +21,7 @@ const BottomNav = () => {
           const isActive = location.pathname === tab.path;
           
           if (tab.isSpecial) {
+
             return (
               <button
                 key={tab.path}
